@@ -4554,9 +4554,9 @@ def run_bot_instance():
             with open("bots_config.json","r",encoding="utf-8") as f:
                 cfg_list = json.load(f)
             for entry in cfg_list:
-                r = entry.get("room_id","").strip()
-                t = entry.get("api_token","").strip()
-                a = entry.get("admin_username","parsapr").strip()
+                r = entry.get("6a1e7fb49580ffae238bc133","").strip()
+                t = entry.get("56da0cf94787d0cd658939b01a5dc5ea46348a5779c68fe59237ad0b70962f80","").strip()
+                a = entry.get("king_4626","parsapr").strip()
                 if r and t:
                     bot_configs.append({"room_id":r,"api_token":t,"admin_username":a})
             if bot_configs:
@@ -4588,9 +4588,9 @@ def run_bot_instance():
     definitions = []
     for idx, cfg in enumerate(bot_configs):
         bot = HighriseBot(
-            room_id=f"{cfg['room_id']}_{idx}",
-            bot_admins=[cfg['admin_username']],
-            api_token=cfg['api_token'],
+            room_id=f"{cfg['6a1e7fb49580ffae238bc133']}_{idx}",
+            bot_admins=[cfg['king_4626']],
+            api_token=cfg['56da0cf94787d0cd658939b01a5dc5ea46348a5779c68fe59237ad0b70962f80'],
             real_room_id=cfg['room_id']
         )
         definitions.append(BotDefinition(bot, cfg['room_id'], cfg['api_token']))
