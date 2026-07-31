@@ -704,14 +704,33 @@ class HighriseBot(BaseBot):
     def resolve_emote_data(self, emote_key: str):
         if not emote_key:
             return None
+        
+        # 1. Convert Persian/Arabic digits to ASCII digits
         key_raw = str(emote_key).strip()
+        p_digits = '۰۱۲۳۴۵۶۷۸۹'
+        a_digits = '٠١٢٣٤٥٦٧٨٩'
+        for p, a, e in zip(p_digits, a_digits, '0123456789'):
+            key_raw = key_raw.replace(p, e).replace(a, e)
+        
         key_str = key_raw.lower()
 
-        # Explicit Floss matching
-        if key_str in ["floss", "flos", "فلوس", "دنس فلوس", "رقص فلوس", "dance-floss", "floss dance"]:
-            return {"id": "dance-floss", "name": "Floss", "duration": 8.0}
+        # 2. Strip common dance prefixes (with or without !)
+        prefixes = [
+            "!dance ", "!دنس ", "!رقص ", "!d ", "!emote ",
+            "dance ", "دنس ", "رقص ", "pr ", "emote ", "d "
+        ]
+        for pref in prefixes:
+            if key_str.startswith(pref):
+                key_str = key_str[len(pref):].strip()
+                break
 
-        # Persian aliases dictionary
+        # Handle attached prefixes like "دنس1", "رقص5", "dance12"
+        for pref_short in ["دنس", "رقص", "dance", "emote"]:
+            if key_str.startswith(pref_short) and len(key_str) > len(pref_short) and key_str[len(pref_short):].isdigit():
+                key_str = key_str[len(pref_short):].strip()
+                break
+
+        # 3. Persian Aliases Dictionary
         persian_aliases = {
             "فلوس": "dance-floss",
             "سویج": "emote-savage",
@@ -719,6 +738,7 @@ class HighriseBot(BaseBot):
             "شاپینگ": "dance-shoppingcart",
             "استراحت": "sit-idle-cute",
             "رست": "sit-idle-cute",
+            "نشستن": "idle-loop-sitfloor",
             "خجالتی": "emote-shy",
             "تیکتاک": "dance-tiktok8",
             "تیک تاک": "dance-tiktok8",
@@ -733,6 +753,16 @@ class HighriseBot(BaseBot):
             "سینگ": "idle_singing",
             "هیرو": "idle-hero",
             "شارژ": "emote-charging",
+            "ماکارنا": "dance-macarena",
+            "روسی": "dance-russian",
+            "دست بالا": "dance-handsup",
+            "بغل": "emote-hug",
+            "گریه": "emote-crying",
+            "کیوت": "emote-cute",
+            "مار": "emote-snake",
+            "قورباغه": "emote-frog",
+            "داغ": "emote-hot",
+            "برفی": "emote-snowball",
             "دنس": "dance-popularvibe",
             "رقص": "dance-popularvibe",
             "پارتی": "dance-popularvibe"
@@ -740,6 +770,10 @@ class HighriseBot(BaseBot):
 
         if key_str in persian_aliases:
             key_str = persian_aliases[key_str]
+
+        # Explicit Floss matching
+        if key_str in ["floss", "flos", "فلوس", "دنس فلوس", "رقص فلوس", "dance-floss", "floss dance"]:
+            return {"id": "dance-floss", "name": "Floss", "duration": 8.0}
 
         # Numbers 1 to len(self.emotes)
         if key_str.isdigit():
@@ -771,72 +805,53 @@ class HighriseBot(BaseBot):
             if e_id.lower() == key_str or e_name.lower() == key_str or key_str in e_id.lower() or key_str in e_name.lower():
                 return {"id": e_id, "name": e_name, "duration": getattr(e, "duration", 5.0)}
 
-        # Fallback raw key
-        return {"id": key_raw, "name": key_raw, "duration": 5.0}
+        # Fallback raw key if present
+        if len(key_raw) > 0:
+            return {"id": key_raw, "name": key_raw, "duration": 5.0}
+
+        return None
 
     async def _repeat_emote(self, uid: str, emote_key: str):
         emote_data = self.resolve_emote_data(emote_key)
         if not emote_data or not emote_data.get("id"): return
+        
         emote_id = emote_data["id"]
         dur = float(emote_data.get("duration", 5.0))
+        
+        fallback_emotes = ["dance-popularvibe", "dance-shoppingcart", "idle-loop-happy", "emote-savage", "sit-idle-cute"]
+        current_emote_id = emote_id
         
         fail_count = 0
         while True:
             try:
                 # Send emote to target user
-                await self.highrise.send_emote(emote_id, uid)
+                await self.highrise.send_emote(current_emote_id, uid)
                 fail_count = 0
                 await asyncio.sleep(max(dur - 0.3, 0.8))
             except asyncio.CancelledError:
                 break
             except Exception as ex:
                 fail_count += 1
-                print(f"Emote repeat error for {uid} ({emote_id}): {ex}")
-                if fail_count >= 2:
+                print(f"Emote repeat error for {uid} ({current_emote_id}): {ex}")
+                
+                # If requested emote failed (e.g. unowned item emote), switch to guaranteed free emote fallback!
+                if fail_count == 1 and current_emote_id != fallback_emotes[0]:
+                    current_emote_id = fallback_emotes[0]
+                    dur = 8.5
                     try:
-                        await self.highrise.send_whisper(uid, f"⚠️ دنس «{emote_data.get('name', emote_id)}» روی آواتار شما قابل اجرا نبود (ممکن است نیازمند خرید آیتم یا غیرفعال باشد).")
+                        await self.highrise.send_whisper(uid, f"⚠️ دنس «{emote_data.get('name', emote_id)}» نیازمند آیتم بود، دنس جایگزین رایگان (Popular Vibe) برای شما اجرا شد! ✨")
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+                    continue
+                
+                if fail_count >= 3:
+                    try:
+                        await self.highrise.send_whisper(uid, f"⚠️ متأسفانه اجرای دنس روی آواتار شما با خطا مواجه شد.")
                     except Exception:
                         pass
                     break
                 await asyncio.sleep(2)
-
-    async def start_follow(self, target_uid: str):
-        if self.follow_task:
-            self.follow_task.cancel()
-            self.follow_task = None
-        self.follow_target = target_uid
-        self.follow_task = asyncio.create_task(self._follow_loop(target_uid))
-
-    async def stop_follow(self):
-        if self.follow_task:
-            self.follow_task.cancel()
-            self.follow_task = None
-        self.follow_target = None
-
-    async def _follow_loop(self, target_uid: str):
-        while True:
-            try:
-                ru = await self.highrise.get_room_users()
-                target_pos = None
-                for u, pos in ru.content:
-                    if u.id == target_uid or u.username.lower() == target_uid.lower().replace("@", ""):
-                        target_pos = pos
-                        break
-                if target_pos and isinstance(target_pos, Position):
-                    new_pos = Position(
-                        x=target_pos.x,
-                        y=target_pos.y,
-                        z=max(0.0, target_pos.z - 0.5),
-                        facing=target_pos.facing
-                    )
-                    await self.highrise.walk_to(new_pos)
-                await asyncio.sleep(1.5)
-            except asyncio.CancelledError:
-                break
-            except Exception as ex:
-                print(f"Follow loop error: {ex}")
-                await asyncio.sleep(2)
-
 
     # On Start
     async def on_start(self, session_metadata) -> None:
@@ -1017,19 +1032,24 @@ class HighriseBot(BaseBot):
                 await self.highrise.send_whisper(user_id, "⏹️ فالو متوقف شد.")
                 return
 
-            # 🎭 Dance / Emote by Floss, Keyword, Number, Name, or Link
-            if (msg_low in ["floss", "فلوس", "!floss", "!فلوس", "فلوس زدن", "دنس فلوس"] or 
-                msg.isdigit() or 
-                "high.rs" in msg_low or "item?id=" in msg_low or 
-                "dance-" in msg_low or "emote-" in msg_low or 
-                msg_low.startswith("pr ") or msg_low.startswith("!dance ") or msg_low.startswith("!دنس ") or msg_low.startswith("!رقص ")):
-                
-                # Resolve key
-                key_to_resolve = msg
-                if msg_low.startswith("!dance ") or msg_low.startswith("!دنس ") or msg_low.startswith("!رقص ") or msg_low.startswith("pr "):
-                    key_to_resolve = msg.split(" ", 1)[1].strip()
-                
-                e_data = self.resolve_emote_data(key_to_resolve)
+            # 🎭 Universal Dance Handler in PV
+            is_explicit_dance_pv = (
+                msg_low in ["floss", "فلوس", "فلوس زدن", "دنس فلوس", "رقص فلوس", "سویج", "پوپولار", "استراحت", "شاپینگ", "تیکتاک", "کیوت", "زامبی", "ماکارنا"] or
+                msg_low.startswith("!dance") or msg_low.startswith("!دنس") or msg_low.startswith("!رقص") or
+                msg_low.startswith("dance") or msg_low.startswith("دنس") or msg_low.startswith("رقص") or
+                msg_low.startswith("pr ") or msg_low.startswith("!emote") or msg_low.startswith("emote") or
+                "high.rs" in msg_low or "item?id=" in msg_low or
+                msg_low.startswith("dance-") or msg_low.startswith("emote-") or msg_low.startswith("idle")
+            )
+
+            converted_msg_pv = msg
+            for p, a, e in zip('۰۱۲۳۴۵۶۷۸۹', '٠١٢٣٤٥٦٧٨٩', '0123456789'):
+                converted_msg_pv = converted_msg_pv.replace(p, e).replace(a, e)
+
+            is_digit_dance_pv = converted_msg_pv.strip().isdigit()
+
+            if is_explicit_dance_pv or is_digit_dance_pv:
+                e_data = self.resolve_emote_data(msg)
                 if e_data and e_data.get("id"):
                     await self.start_user_dance(user_id, e_data["id"])
                     await self.highrise.send_whisper(user_id, f"🎭 دنس «{e_data.get('name', e_data['id'])}» برای شما اجرا شد! ✨")
@@ -1335,21 +1355,24 @@ class HighriseBot(BaseBot):
                 await self.highrise.chat("⏹️ فالو متوقف شد.")
                 return
 
-            # 🎵 Dance Handler (Floss, Emote Names, Numbers, Links, !dance, !دنس, !رقص, pr)
-            is_dance_cmd = (
-                msg_low in ["floss", "فلوس", "!floss", "!فلوس", "فلوس زدن", "دنس فلوس", "سویج", "پوپولار", "استراحت", "شاپینگ", "تیکتاک"] or
-                msg.isdigit() or
+            # 🎵 Universal Dance Handler
+            is_explicit_dance = (
+                msg_low in ["floss", "فلوس", "فلوس زدن", "دنس فلوس", "رقص فلوس", "سویج", "پوپولار", "استراحت", "شاپینگ", "تیکتاک", "کیوت", "زامبی", "ماکارنا"] or
+                msg_low.startswith("!dance") or msg_low.startswith("!دنس") or msg_low.startswith("!رقص") or
+                msg_low.startswith("dance") or msg_low.startswith("دنس") or msg_low.startswith("رقص") or
+                msg_low.startswith("pr ") or msg_low.startswith("!emote") or msg_low.startswith("emote") or
                 "high.rs" in msg_low or "item?id=" in msg_low or
-                "dance-" in msg_low or "emote-" in msg_low or
-                msg_low.startswith("pr ") or msg_low.startswith("!dance ") or msg_low.startswith("!دنس ") or msg_low.startswith("!رقص ")
+                msg_low.startswith("dance-") or msg_low.startswith("emote-") or msg_low.startswith("idle")
             )
 
-            if is_dance_cmd:
-                key_to_resolve = msg
-                if msg_low.startswith("!dance ") or msg_low.startswith("!دنس ") or msg_low.startswith("!رقص ") or msg_low.startswith("pr "):
-                    key_to_resolve = msg.split(" ", 1)[1].strip()
+            converted_msg = msg
+            for p, a, e in zip('۰۱۲۳۴۵۶۷۸۹', '٠١٢٣٤٥٦٧٨٩', '0123456789'):
+                converted_msg = converted_msg.replace(p, e).replace(a, e)
 
-                e_data = self.resolve_emote_data(key_to_resolve)
+            is_digit_dance = converted_msg.strip().isdigit()
+
+            if is_explicit_dance or is_digit_dance:
+                e_data = self.resolve_emote_data(msg)
                 if e_data and e_data.get("id"):
                     await self.start_user_dance(user_id, e_data["id"])
                     await self.highrise.chat(f"🎭 دنس «{e_data.get('name', e_data['id'])}» برای @{username} اجرا شد! ✨")
